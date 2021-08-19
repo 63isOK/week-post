@@ -41,9 +41,6 @@ go module用来管理依赖的,先了解定义.
     - 在语义版本2.0中,分主版本.次版本.修订版本-预发布+build元信息
     - 在版本比较时,build元信息是被忽略的
     - go.mod可以出现build元信息,+incompatible表示非module项目的主版本到了2或以上
-    - 什么样的项目才不会使用module?
-      - 不再维护的项目
-      - 云厂商的sdk:一直希望开发者用最新版本,破坏性变更较多;开发者也必须用最新的
   - go命令会自动将"tag/branch/commit号"转换成对应的标准版本号
     - 首先会移除build信息(+incompatible除外)
     - 预发布版本的信息会替换成"提交号+时间戳"
@@ -62,3 +59,51 @@ go module用来管理依赖的,先了解定义.
   - 相同基础版本的预发布版本,在比较时按时间顺序比较
   - 依赖时间戳是防止基于预发布机制做处的攻击行为
   - 预发布版本会由工具自动维护,不需要手动编写
+- 主版本号,eg:v3 v2
+  - 按语义版本2.0的规范,此仓库至少包含两个不兼容的主版本
+  - go.mod需要表明自己引用的是哪个版本,不带主版本号表示用v1
+  - 主版本号后缀的规则是:如果新旧两个包都使用同一个import路径,则新包必定向后兼容旧包
+    - 这也是为什么需要将v2/v3等添加到import路径中,主要是方便区分不兼容的多个版本
+  - v0是不稳定的,v1是最有可能做到向后兼容的版本,所以主版本号不需要v0和v1
+    - 特例:gopkg.in需要一直带主版本号,eg:gopkg.in/pion/webrtc.v3
+    - 后缀不是/,而是.
+    - gopkg.in是一个路由站,针对github仓库实现的
+  - 利用主版本号,可在一次编译中,同时使用到不同的主版本
+- 包是如何添加到module的(下面是解析过程)
+  - 这里的解析过程特指:使用go命令+package path的解析
+  - (01)用package path的前缀(即包对应的module)去build list中查找
+    - build list解释:
+      - 是整个module图
+      - 是所有依赖module最小版本的集合
+  - (02)在build list中找到了pakcage前缀对应的module
+    - 如果找到了,go命令会进一步检查package是否存在这个module中
+      - package带的子目录(如果package带子目录)是否存在module中
+      - 是否有go源码存在于子目录中
+        - go build的约束不适用于这儿
+    - 如果确认了module提供要找的package,就使用这个module
+    - 如果module不提供要找的package;或有多个module提供要找的package,go命令会报错
+      - flag `-mod=mod`会让go命令试图去找个新的module,并更新对应的go.mod/go.sum
+        - go get/go mod tidy 默认就带了`-mod=mod` flag
+  - (03)go命令要为package找个新module(即在build list中未能找到提供package的module)
+    - 第一步要确认代理信息(goproxy环境变量)
+      - goproxy是由代理url列表和direct/off组成,用逗号隔开
+        - 代理url都用goproxy协议通信
+        - direct表示直接和版本控制系统(eg:git)通信
+        - off表示不应该尝试通信
+        - goprivate/gonoproxy两个环境变量也对此处的行为有影响
+    - go命令会针对代理信息来找module(如果失败,就对下一个代理信息查找)
+      - 具体做法是将package path的各个前缀拿去代理处请求(并行的)
+      - 失败的标志是所有请求都失败了(404/410);或module中并不提供指定的package
+      - 成功的标识有两点:
+        - 一是有请求成功
+        - 二是go命令会对所有成功的请求,下载对应的module,并在module中找到了package
+      - 如果有多个请求成功了,最长路径的module就是要找的
+  - (04)如果go命令为package找到了新的moudle,则更新主moudle go.mod的require指令
+  - 通过由package找module的规则,确保了一点:未来加载了一个相同的package,这个package和老package一样,都会使用同一个module
+  - 如果一个已解析的包并没有被主module直接导入,则需要添加注释 // indirect
+    - 有两种情况会发生这种情况:
+      - 直接依赖A未启用go module,那么A依赖的BCD就会在主moudle中出现,并添加 // indirect
+      - 直接依赖A启用了go module,但A依赖的D未添加到A的依赖中,也需要在主module中依赖D,并添加 // indirect
+    - 当所有go项目都迁移到go module后,就不会出现间接依赖的注释了
+    - go mod why -m 依赖 可查找依赖链
+    - go mod why -m all 可查找所有依赖链
