@@ -194,3 +194,61 @@ ps: 如果module path以"gopkg.in/"开头,则上面两点要求要替换成gopkg
 
 在module path和版本有关联的地方(eg:require/replace/exclude指令中),
 最后的path元素必须是版本.
+
+#### 语法
+
+依旧时ebnf语法格式:
+
+```ebnf
+GoMod = { Directive } .
+Directive = ModuleDirective |
+            GoDirective |
+            RequireDirective |
+            ExcludeDirective |
+            ReplaceDirective |
+            RetractDirective .
+
+ModulePath = ident | string . /* see restrictions above */
+Version = ident | string .    /* see restrictions above */
+
+```
+
+其中ident/string/newline分别表示标识符/字符串/新行.
+
+##### module指令
+
+module指令定义了主module的module path,一个go.mod只包含一个module指令.
+
+```ebnf
+ModuleDirective = "module" ( ModulePath | "(" newline ModulePath newline ")" ) newline .
+```
+
+eg: `module golang.org/x/net`
+
+弃用:
+
+在注释部分以`Deprecated:`开头,即可将module标记为弃用状态.
+`Deprecated:`之后的部分表示弃用消息.
+注释可出现在module指令的上一行,或出现在module指令的尾部.
+
+```go.mod
+// Deprecated: use example.com/mod/v2 instead.
+module example.com/mod
+```
+
+go1.17之后,golist -m -u 会检查build list中所有弃用module的信息;
+go get会检查所依赖的弃用module.
+
+弃用的正确做法是:
+
+- 给新发布的release打tag
+- module的作者将module标记为弃用
+- 弃用信息说明代替品为新release
+- 在新版的relase上,可以改变或取消弃用
+
+弃用对于库的开发者来说,非常有用,这是和使用沟通的工具,
+当使用者使用golist -m -u等命令时,会立马发现库的状态.
+
+弃用的目的是提醒使用者:当前module不再提供支持,以及迁移指南.
+
+最好不要对最后一个版本弃用,改用retract更为合适.
